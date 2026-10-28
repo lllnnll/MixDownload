@@ -1,0 +1,14 @@
+# Modele de playlists.txt : copie ce fichier en playlists.txt et garde tes lignes.
+# Une playlist par ligne. Les lignes commençant par # sont ignorées.
+# Spotify (playlist, album ou titre)
+https://open.spotify.com/playlist/XXXXXXXXXXXXXXXXXXXXXX
+# Deezer (playlists publiques seulement)
+https://www.deezer.com/fr/playlist/1234567890
+# Apple Music (lien de partage de la playlist)
+https://music.apple.com/fr/playlist/ma-playlist/pl.xxxxxxxx
+# SoundCloud (set, titre ou profil)
+https://soundcloud.com/utilisateur/sets/ma-playlist
+# Fichier CSV (chemin absolu ou relatif au dossier MixDownload)
+# exports/ma_playlist.csv
+# macOS uniquement : nom EXACT d'une playlist de l'app Musique
+# Diggin 2026

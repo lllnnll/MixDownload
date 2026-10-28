@@ -1,8 +1,30 @@
-# Morceaux telecharges (volumineux)
+# Environnement Python
+venv/
+.venv/
+__pycache__/
+
+# Morceaux telecharges (volumineux), logs, etat genere automatiquement
 downloads/
-# Logs et etat genere automatiquement
+logs/
 *.log
 state.json
-__pycache__/
+.archive.txt
+.yt-dlp-archive.txt
+rapport.csv
+
+# Cles et jetons (Spotify, etc.) : ne jamais les publier
+.spotify_cache
+.cache
+.cache-*
+.env
+*.env
+spotify.json
+spotify_token.json
+*secret*
+*.key
+*.pem
+
+# Systeme / editeur
 .DS_Store
+Thumbs.db
 .claude/settings.local.json
