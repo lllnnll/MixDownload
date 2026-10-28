@@ -35,6 +35,7 @@ Comment fonctionne le suivi des "nouveautes" :
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,7 @@ CONFIG_FILE = BASE_DIR / "config.json"
 STATE_FILE = BASE_DIR / "state.json"
 
 DEFAULT_CONFIG = {
-    "output_dir": str(BASE_DIR / "downloads"),
+    "output_dir": str(Path.home() / "Music" / "MixDownload"),
     "audio_format": "wav",      # wav, aiff, flac, mp3...
     "subfolder_per_playlist": True,
     "max_retries": 4,           # nombre de tentatives par morceau
@@ -61,7 +62,7 @@ DEFAULT_CONFIG = {
     "search_results": 3,        # combien de resultats SoundCloud essayer (scsearchN)
     "ytdlp_path": "yt-dlp",     # chemin vers le binaire yt-dlp (ex: "/opt/homebrew/bin/yt-dlp-nightly")
     "youtube_player_clients": "ios,web,mweb",  # clients YouTube a essayer (contourne le 403 android_vr)
-    "youtube_cookies_browser": "arc",          # navigateur pour --cookies-from-browser ("" pour desactiver)
+    "youtube_cookies_browser": "",             # navigateur pour --cookies-from-browser (ex: "chrome", "" = desactive)
 }
 
 
@@ -310,6 +311,62 @@ def process_playlist(entry, cfg, state, args, explicit=False):
     return ok, fail, len(to_get)
 
 
+def install_hint(tool):
+    """Commande d'installation de yt-dlp / ffmpeg adaptee a l'OS."""
+    if sys.platform == "darwin":
+        return f"brew install {tool}"
+    if os.name == "nt":
+        return {"yt-dlp": "winget install yt-dlp.yt-dlp", "ffmpeg": "winget install Gyan.FFmpeg"}[tool]
+    if tool == "yt-dlp":
+        return "python3 -m pip install -U yt-dlp   (ou relance install.sh)"
+    for manager, cmd in (("apt-get", "sudo apt install ffmpeg"), ("dnf", "sudo dnf install ffmpeg"),
+                         ("pacman", "sudo pacman -S ffmpeg"), ("zypper", "sudo zypper install ffmpeg")):
+        if shutil.which(manager):
+            return cmd
+    return "installe ffmpeg avec le gestionnaire de paquets de ta distribution"
+
+
+def find_ytdlp(ytdlp_path):
+    """Chemin de yt-dlp utilisable, ou None. Cherche aussi dans le venv du Python courant."""
+    if Path(ytdlp_path).is_file() or shutil.which(ytdlp_path):
+        return ytdlp_path
+    if ytdlp_path == "yt-dlp":
+        venv_bin = Path(sys.executable).parent / ("yt-dlp.exe" if os.name == "nt" else "yt-dlp")
+        if venv_bin.is_file():
+            return str(venv_bin)
+    return None
+
+
+def check_dependencies(cfg, dry_run):
+    """Verifie yt-dlp et ffmpeg ; quitte avec un message clair s'il en manque."""
+    missing = []
+    found = find_ytdlp(cfg.get("ytdlp_path", "yt-dlp"))
+    if found:
+        cfg["ytdlp_path"] = found
+    else:
+        missing.append(("yt-dlp", cfg.get("ytdlp_path", "yt-dlp")))
+    # ffmpeg sert a la conversion audio : inutile pour un simple --dry-run
+    if not shutil.which("ffmpeg") and not dry_run:
+        missing.append(("ffmpeg", "ffmpeg"))
+    if missing:
+        lines = [f"  - {tool} introuvable ({path}). Installe-le :  {install_hint(tool)}"
+                 for tool, path in missing]
+        sys.exit("Dependance(s) manquante(s) :\n" + "\n".join(lines)
+                 + "\nPuis ferme et rouvre le terminal, et relance.")
+    if not shutil.which("ffmpeg"):
+        log(f"!! ffmpeg introuvable (necessaire pour telecharger) : {install_hint('ffmpeg')}")
+
+
+def setup_console():
+    """Sortie en UTF-8 partout (emojis, accents) ; sous Windows on relance en mode UTF-8
+    pour que les sorties de yt-dlp soient aussi decodees en UTF-8."""
+    if os.name == "nt" and not sys.flags.utf8_mode:
+        sys.exit(subprocess.call([sys.executable, "-X", "utf8", *sys.argv]))
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def get_ytdlp_version(ytdlp_path):
     try:
         r = subprocess.run([ytdlp_path, "--version"], capture_output=True, text=True, timeout=10)
@@ -319,6 +376,7 @@ def get_ytdlp_version(ytdlp_path):
 
 
 def main():
+    setup_console()
     p = argparse.ArgumentParser(
         description="Playlists (Apple Music, Spotify, Deezer, SoundCloud, CSV) -> SoundCloud (yt-dlp)")
     p.add_argument("sources", nargs="*", metavar="SOURCE",
@@ -340,10 +398,8 @@ def main():
         cfg["output_dir"] = args.output
     if args.format:
         cfg["audio_format"] = args.format.lower().lstrip(".")
-    ytdlp_path = cfg.get("ytdlp_path", "yt-dlp")
-
-    if not (Path(ytdlp_path).is_file() or shutil.which(ytdlp_path)):
-        sys.exit(f"yt-dlp introuvable : {ytdlp_path}. Installe-le : brew install yt-dlp ffmpeg")
+    check_dependencies(cfg, args.dry_run)
+    ytdlp_path = cfg["ytdlp_path"]
 
     # (entree, explicite) : les SOURCE en argument telechargent tout au 1er passage
     if args.sources or args.playlist:

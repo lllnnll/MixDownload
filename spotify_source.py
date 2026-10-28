@@ -68,7 +68,7 @@ def load_credentials() -> tuple[str, str] | None:
     if cid and secret:
         return cid, secret
     if CONFIG_FILE.exists():
-        data = json.loads(CONFIG_FILE.read_text())
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         if data.get("client_id") and data.get("client_secret"):
             return data["client_id"], data["client_secret"]
     return None
@@ -82,7 +82,7 @@ def setup() -> None:
     if not cid or not secret:
         sys.exit("Client ID et Secret obligatoires.")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps({"client_id": cid, "client_secret": secret}, indent=2))
+    CONFIG_FILE.write_text(json.dumps({"client_id": cid, "client_secret": secret}, indent=2), encoding="utf-8")
     CONFIG_FILE.chmod(0o600)
     TOKEN_CACHE.unlink(missing_ok=True)
     print(f"\n✅ Enregistré dans {CONFIG_FILE}. Connexion au compte…")
@@ -247,6 +247,10 @@ def fetch_spotify(url: str) -> list[Track]:
 
 
 def main():
+    # Emojis : evite les plantages d'encodage dans la console Windows
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description="Source Spotify de MixDownload")
     p.add_argument("url", nargs="?", help="URL de playlist, album ou titre Spotify")
     p.add_argument("--setup", action="store_true", help="configurer Client ID / Secret")
