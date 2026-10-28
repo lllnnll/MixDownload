@@ -1,5 +1,7 @@
 # Utiliser MixDownload avec Spotify
 
+Retour au [README principal](README.md).
+
 MixDownload lit les titres de ta playlist Spotify, puis les cherche et les télécharge sur SoundCloud. **Aucun fichier audio n'est récupéré depuis Spotify.**
 
 ## Quel mode choisir ?
@@ -11,6 +13,8 @@ MixDownload lit les titres de ta playlist Spotify, puis les cherche et les tél�
 | Playlist de quelqu'un d'autre de plus de 100 titres | Export CSV | Aucune |
 
 Le script choisit tout seul : il essaie le mode « avec compte » s'il est configuré, sinon il passe au mode « sans compte ».
+
+`python` désigne ici le Python du venv créé par `install.sh` / `install.ps1` (`venv/bin/python`, ou `.\venv\Scripts\python.exe` sous Windows). spotipy y est déjà installé.
 
 ## Mode sans compte
 
@@ -50,7 +54,6 @@ Dans **Settings**, copie le **Client ID**. Clique ensuite sur **View client secr
 ### 4. Configurer MixDownload
 
 ```bash
-pip install spotipy
 python spotify_source.py --setup
 ```
 
@@ -86,7 +89,7 @@ python mixdownload.py ma_playlist.csv
 | `403 Accès refusé` | Vérifie que ton compte est Premium et que ton e-mail est dans **User Management**. |
 | `404 Introuvable` | La playlist n'est pas à toi. Le script passe automatiquement au mode sans compte ; utilise un CSV si elle dépasse 100 titres. |
 | `INVALID_CLIENT: Invalid redirect URI` | La Redirect URI de l'app doit être exactement `http://127.0.0.1:8888/callback`. |
-| `Module manquant : spotipy` | `pip install spotipy` |
+| `Module manquant : spotipy` | Utilise le Python du venv, ou relance `install.sh` / `install.ps1`. |
 | Tu veux changer de compte | `python spotify_source.py --logout`, puis `--setup` |
 
 Les clés sont stockées dans `~/.mixdownload/spotify.json`. Tu peux aussi utiliser les variables d'environnement `SPOTIFY_CLIENT_ID` et `SPOTIFY_CLIENT_SECRET`.

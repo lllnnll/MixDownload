@@ -26,11 +26,12 @@ Usage :
     python3 mixdownload.py --playlist "Nom" # force une seule playlist (sinon lit playlists.txt)
 
 Comment fonctionne le suivi des "nouveautes" :
-    Au tout premier passage sur une playlist, le script enregistre simplement
+    Au tout premier passage sur une playlist de playlists.txt, le script enregistre simplement
     une "baseline" (la liste des morceaux deja presents) SANS rien telecharger,
     pour eviter de tout aspirer d'un coup. Les passages suivants ne telechargent
     que les morceaux ajoutes apres cette baseline.
     -> Utilise --download-all une fois si tu veux recuperer tout l'existant.
+    Une SOURCE passee en argument est, elle, telechargee entierement au 1er passage.
 """
 
 import argparse

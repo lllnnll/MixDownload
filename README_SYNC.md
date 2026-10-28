@@ -1,10 +1,10 @@
 # Synchronisation automatique quotidienne
 
-MixDownload peut vérifier tes playlists chaque jour et télécharger **uniquement les nouveaux titres**. Les titres déjà récupérés sont mémorisés dans `.archive.txt`.
+MixDownload peut vérifier tes playlists chaque jour et télécharger **uniquement les nouveaux titres**. Les titres déjà traités sont mémorisés dans `state.json`. Retour au [README principal](README.md).
 
 ## 1. Lister tes playlists
 
-Ouvre `playlists.txt` et mets une URL par ligne. Toutes les plateformes peuvent être mélangées. Les lignes qui commencent par `#` sont ignorées.
+Crée `playlists.txt` (tu peux partir de [playlists.example.txt](playlists.example.txt)) et mets une entrée par ligne. Les plateformes peuvent être mélangées. Les lignes qui commencent par `#` sont ignorées.
 
 ```
 https://open.spotify.com/playlist/XXXXXXXXXXXXXXXXXXXXXX
@@ -13,36 +13,67 @@ https://music.apple.com/fr/playlist/ma-playlist/pl.xxxxxxxx
 https://soundcloud.com/utilisateur/sets/ma-playlist
 ```
 
-Pour Spotify, fais d'abord `python spotify_source.py --setup` (voir `README_SPOTIFY.md`). La connexion se renouvelle ensuite toute seule.
+Sur macOS, tu peux aussi mettre le **nom exact** d'une playlist de l'app Musique.
+
+**Premier passage** : pour chaque nouvelle ligne, le script enregistre l'état actuel de la playlist **sans rien télécharger** (baseline). Seuls les titres ajoutés ensuite sont téléchargés. Pour récupérer l'existant une fois, lance avant `python mixdownload.py "<URL>"` (ou `--download-all`).
+
+Pour Spotify avec ton compte, fais d'abord `python spotify_source.py --setup` (voir [README_SPOTIFY.md](README_SPOTIFY.md)). La connexion se renouvelle ensuite toute seule.
+
+## Réglages de la synchro
+
+`sync.sh` et `sync.ps1` lancent `mixdownload.py -o <dossier> --format <format>` une seule fois. Le script lit lui-même `playlists.txt`.
+
+| Réglage | Défaut | Variable d'environnement |
+|---|---|---|
+| Dossier de sortie | `~/Music/MixDownload` | `MIXDOWNLOAD_OUT` |
+| Format (`aiff`, `wav`, `mp3`…) | `aiff` | `MIXDOWNLOAD_FORMAT` |
+| Python | `venv` s'il existe, sinon `python3` / `python` | `PYTHON` |
+
+Tu peux aussi modifier directement les lignes `OUT=` / `FORMAT=` (`sync.sh`) ou `$Out` / `$Format` (`sync.ps1`).
 
 ---
 
 ## macOS
 
 ### Prérequis
-```bash
-brew install python ffmpeg
-pip3 install yt-dlp requests spotipy
-```
+Lance l'installation du [README principal](README.md#installation) : `bash install.sh`.
 
 ### Tester
 ```bash
-chmod +x sync.sh
 ./sync.sh
 ```
-Les résultats sont dans `logs/`. Les morceaux vont dans `~/Music/DJ/MixDownload`.
+Les résultats sont dans `logs/`. Les morceaux vont dans `~/Music/MixDownload`.
 
 ### Automatiser (tous les jours à 9h)
-1. Ouvre `com.mixdownload.sync.plist` et remplace `CHEMIN` par le chemin complet du dossier MixDownload (ex. `/Users/toi/MixDownload`).
-2. Lance :
+Depuis le dossier MixDownload :
 ```bash
-cp com.mixdownload.sync.plist ~/Library/LaunchAgents/
+sed "s|CHEMIN|$PWD|" com.mixdownload.sync.plist > ~/Library/LaunchAgents/com.mixdownload.sync.plist
 launchctl load ~/Library/LaunchAgents/com.mixdownload.sync.plist
 launchctl start com.mixdownload.sync      # test immédiat
 ```
+La commande `sed` remplace `CHEMIN` par le chemin du dossier. Pour changer l'heure, modifie `Hour` / `Minute` dans le fichier copié.
+
 Si le Mac dormait à 9h, la tâche se lance à son réveil.
 
 Pour désactiver : `launchctl unload ~/Library/LaunchAgents/com.mixdownload.sync.plist`
+
+> La première fois, macOS peut demander d'autoriser l'accès à l'app Musique (playlists par nom), ou au dossier Musique.
+
+---
+
+## Linux
+
+### Prérequis
+`bash install.sh` (voir le [README principal](README.md#installation)).
+
+### Automatiser (tous les jours à 9h, avec cron)
+```bash
+crontab -e
+```
+Puis ajoute la ligne suivante, en remplaçant le chemin :
+```
+0 9 * * * /bin/bash /chemin/vers/MixDownload/sync.sh
+```
 
 ---
 
@@ -54,9 +85,9 @@ Ouvre **PowerShell** et lance :
 winget install Python.Python.3.12
 winget install Gyan.FFmpeg
 ```
-**Ferme puis rouvre PowerShell** pour que ces commandes soient reconnues, puis :
+**Ferme puis rouvre PowerShell** pour que ces commandes soient reconnues. Ensuite, dans le dossier MixDownload :
 ```powershell
-pip install yt-dlp requests spotipy
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 Vérifie avec `python --version` et `ffmpeg -version`.
 
@@ -67,7 +98,7 @@ Dans le dossier MixDownload :
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\sync.ps1
 ```
-Les résultats sont dans `logs\`. Les morceaux vont dans `C:\Users\<toi>\Music\DJ\MixDownload`.
+Les résultats sont dans `logs\`. Les morceaux vont dans `C:\Users\<toi>\Music\MixDownload`.
 
 ### Automatiser (tous les jours à 9h)
 ```powershell
@@ -82,16 +113,9 @@ Pour désactiver : `Unregister-ScheduledTask -TaskName MixDownload -Confirm:$fal
 
 ---
 
-## Options communes
-
-| Réglage | macOS (`sync.sh`) | Windows (`sync.ps1`) |
-|---|---|---|
-| Dossier de sortie | `OUT=...` | `$Out = ...` |
-| Format (`aiff`, `mp3`, `wav`…) | `FORMAT=...` | `$Format = ...` |
-| Python d'un venv | `PYTHON=./venv/bin/python` | détecté automatiquement si `venv\` existe |
-
 ## À savoir
 - **Ajouts seulement** : un titre retiré d'une playlist n'est pas supprimé de ton dossier.
+- **Échecs** : un titre introuvable n'est pas mémorisé. Il est réessayé à la synchro suivante.
 - **Spotify sans compte** : une playlist d'un autre utilisateur reste plafonnée à environ 100 titres.
-- **Apple Music** : la lecture se fait sur la page web. Si Apple change son site, la sync peut trouver 0 titre sans erreur. Vérifie les logs de temps en temps.
+- **Apple Music par lien** : la lecture se fait sur la page web. Si Apple change son site, la synchro peut trouver 0 titre ou afficher une erreur. Vérifie les logs de temps en temps.
 - **Format AIFF** : il s'importe sans souci dans Rekordbox, sur Mac comme sur Windows.
