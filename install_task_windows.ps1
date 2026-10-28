@@ -1,4 +1,4 @@
-# Crée une tâche planifiée Windows qui lance sync.ps1 tous les jours.
+﻿# Crée une tâche planifiée Windows qui lance sync.ps1 tous les jours.
 # Usage : clic droit > « Exécuter avec PowerShell »  (ou : powershell -ExecutionPolicy Bypass -File install_task_windows.ps1)
 param([string]$Heure = "09:00")
 

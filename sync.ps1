@@ -1,9 +1,10 @@
-# Synchronise toutes les playlists de playlists.txt (seuls les nouveaux titres sont téléchargés).
+﻿# Synchronise toutes les playlists de playlists.txt (seuls les nouveaux titres sont téléchargés).
+# Réglages modifiables ici ou par variables d'environnement (MIXDOWNLOAD_OUT, MIXDOWNLOAD_FORMAT, PYTHON).
 Set-Location -Path $PSScriptRoot
 
 $Python = if ($env:PYTHON) { $env:PYTHON } elseif (Test-Path ".\venv\Scripts\python.exe") { ".\venv\Scripts\python.exe" } else { "python" }
-$Out    = Join-Path $env:USERPROFILE "Music\DJ\MixDownload"
-$Format = "aiff"
+$Out    = if ($env:MIXDOWNLOAD_OUT) { $env:MIXDOWNLOAD_OUT } else { Join-Path $env:USERPROFILE "Music\MixDownload" }
+$Format = if ($env:MIXDOWNLOAD_FORMAT) { $env:MIXDOWNLOAD_FORMAT } else { "aiff" }
 $Log    = "logs\sync_$(Get-Date -Format 'yyyy-MM-dd').log"
 
 # Évite les plantages d'encodage (emojis) dans la console Windows
@@ -13,13 +14,9 @@ $env:PYTHONIOENCODING = "utf-8"
 New-Item -ItemType Directory -Force -Path "logs", $Out | Out-Null
 "=== Sync $(Get-Date) ===" | Out-File -Append -Encoding utf8 $Log
 
-Get-Content playlists.txt | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") } | ForEach-Object {
-    $url = $_.Trim()
-    "--- $url" | Out-File -Append -Encoding utf8 $Log
-    & $Python mixdownload.py $url -o $Out --format $Format 2>&1 | Out-File -Append -Encoding utf8 $Log
-    if ($LASTEXITCODE -ne 0) { "Échec : $url" | Out-File -Append -Encoding utf8 $Log }
-    Start-Sleep -Seconds 30   # évite de se faire limiter par SoundCloud
-}
+# mixdownload.py lit lui-même playlists.txt et ne télécharge que les nouveautés
+& $Python mixdownload.py -o $Out --format $Format 2>&1 | Out-File -Append -Encoding utf8 $Log
+if ($LASTEXITCODE -ne 0) { "Échec de la synchronisation (code $LASTEXITCODE)" | Out-File -Append -Encoding utf8 $Log }
 
 # Garde 30 jours de logs
 Get-ChildItem logs -Filter *.log | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item
