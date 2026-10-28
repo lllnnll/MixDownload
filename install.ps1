@@ -1,4 +1,4 @@
-# Installation de MixDownload (Windows) :
+﻿# Installation de MixDownload (Windows) :
 #   - crée un environnement virtuel Python (venv\)
 #   - installe les dépendances (requirements.txt : yt-dlp, requests, spotipy)
 #   - vérifie ffmpeg
