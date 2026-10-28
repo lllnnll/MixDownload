@@ -2,23 +2,25 @@
 """
 mixdownload.py
 
-Verifie chaque jour une liste de playlists Apple Music (app Musique, macOS).
-Pour chaque nouveau morceau ajoute depuis la derniere verification, il le
-cherche sur SoundCloud et le telecharge avec yt-dlp, dans la meilleure qualite
-possible, converti en WAV (ideal pour rekordbox), avec plusieurs tentatives en
-cas d'echec.
+Verifie chaque jour une liste de playlists (Apple Music, Spotify, Deezer,
+SoundCloud ou fichier CSV). Pour chaque nouveau morceau ajoute depuis la
+derniere verification, il le cherche sur SoundCloud (ou le prend directement
+pour une playlist SoundCloud) et le telecharge avec yt-dlp, dans la meilleure
+qualite possible, converti en WAV (ideal pour rekordbox), avec plusieurs
+tentatives en cas d'echec.
 
-Base sur applemusic_to_soundcloud.py.
+La lecture des playlists est dans sources/ (un module par plateforme).
 
-Prerequis :
-    brew install yt-dlp ffmpeg
+Prerequis : yt-dlp et ffmpeg (voir README.md, install.sh / install.ps1)
 
 Configuration :
-    - playlists.txt : une playlist par ligne (les lignes vides / commencant par # sont ignorees)
+    - playlists.txt : une playlist par ligne (URL, fichier .csv, ou nom dans l'app Musique sur macOS)
     - config.json   : options (dossier de sortie, format, retries...) - genere au 1er lancement
 
 Usage :
     python3 mixdownload.py                 # verification normale (telecharge les nouveautes)
+    python3 mixdownload.py <url|fichier.csv> [-o DOSSIER] [--format aiff]
+                                           # une playlist precise : tout au 1er passage, puis nouveautes
     python3 mixdownload.py --dry-run       # liste seulement ce qui serait telecharge
     python3 mixdownload.py --download-all   # ignore l'etat : (re)telecharge TOUT le contenu actuel
     python3 mixdownload.py --playlist "Nom" # force une seule playlist (sinon lit playlists.txt)
@@ -40,12 +42,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from sources import fetch_tracks
+from sources.apple import get_playlist_tracks  # noqa: F401  (compatibilite : import mixdownload)
+from sources.common import LOG_FILE, log  # noqa: F401
+
 # Repertoire du script (tout est stocke a cote)
 BASE_DIR = Path(__file__).resolve().parent
 PLAYLISTS_FILE = BASE_DIR / "playlists.txt"
 CONFIG_FILE = BASE_DIR / "config.json"
 STATE_FILE = BASE_DIR / "state.json"
-LOG_FILE = BASE_DIR / "mixdownload.log"
 
 DEFAULT_CONFIG = {
     "output_dir": str(BASE_DIR / "downloads"),
@@ -59,45 +64,8 @@ DEFAULT_CONFIG = {
     "youtube_cookies_browser": "arc",          # navigateur pour --cookies-from-browser ("" pour desactiver)
 }
 
-# --- AppleScript : recupere artiste + titre de chaque morceau d'une playlist ---
-APPLESCRIPT = '''
-on run argv
-    set playlistName to item 1 of argv
-    tell application "Music"
-        if not (exists playlist playlistName) then
-            return "__NOT_FOUND__"
-        end if
-        set out to ""
-        repeat with t in (tracks of playlist playlistName)
-            set a to ""
-            set n to ""
-            try
-                set a to artist of t
-            end try
-            try
-                set n to name of t
-            end try
-            set out to out & a & tab & n & linefeed
-        end repeat
-        return out
-    end tell
-end run
-'''
-
 
 # ----------------------------- utilitaires ----------------------------------
-
-def log(msg):
-    """Affiche et ecrit dans le fichier de log avec horodatage."""
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{stamp}] {msg}"
-    print(line, flush=True)
-    try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass
-
 
 def load_json(path, default):
     if path.exists():
@@ -124,10 +92,14 @@ def load_playlists():
     if not PLAYLISTS_FILE.exists():
         # cree un modele pour que l'utilisateur le remplisse
         PLAYLISTS_FILE.write_text(
-            "# Une playlist Apple Music par ligne (nom EXACT tel qu'affiche dans l'app Musique).\n"
-            "# Les lignes vides et celles commencant par # sont ignorees.\n"
-            "# Exemple :\n"
-            "# Mes sons a mixer\n"
+            "# Une playlist par ligne. Les lignes vides et celles commencant par # sont ignorees.\n"
+            "# Accepte : URL Apple Music, Spotify, Deezer, SoundCloud, chemin d'un fichier .csv,\n"
+            "# ou (macOS) le nom EXACT d'une playlist de l'app Musique.\n"
+            "# Exemples :\n"
+            "# https://open.spotify.com/playlist/XXXXXXXXXXXXXXXXXXXXXX\n"
+            "# https://www.deezer.com/fr/playlist/1234567890\n"
+            "# https://music.apple.com/fr/playlist/ma-playlist/pl.xxxxxxxx\n"
+            "# https://soundcloud.com/utilisateur/sets/ma-playlist\n"
             "# Diggin 2026\n",
             encoding="utf-8",
         )
@@ -140,37 +112,7 @@ def load_playlists():
     return names
 
 
-# --------------------------- Apple Music ------------------------------------
-
-def get_playlist_tracks(playlist_name):
-    """Renvoie une liste de tuples (artiste, titre) depuis l'app Musique."""
-    if shutil.which("osascript") is None:
-        sys.exit("osascript introuvable — ce script ne tourne que sur macOS.")
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", APPLESCRIPT, playlist_name],
-            capture_output=True, text=True, check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        log(f"!! Erreur AppleScript pour \"{playlist_name}\" : {e.stderr.strip()}")
-        return None
-
-    raw = result.stdout.strip()
-    if raw == "__NOT_FOUND__":
-        log(f'!! Playlist introuvable dans l\'app Musique : "{playlist_name}"')
-        return None
-
-    tracks = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        artist = parts[0].strip() if len(parts) > 0 else ""
-        title = parts[1].strip() if len(parts) > 1 else ""
-        if title:
-            tracks.append((artist, title))
-    return tracks
-
+# ------------------------------ suivi ---------------------------------------
 
 def track_key(artist, title):
     """Identifiant stable d'un morceau pour le suivi d'etat."""
@@ -250,26 +192,68 @@ def download(query, outdir, fmt, search_results, max_retries, retry_delay,
     return False
 
 
+def download_direct(url, outdir, fmt, max_retries, retry_delay, ytdlp_path="yt-dlp"):
+    """
+    Telecharge directement une URL (titre SoundCloud), sans recherche.
+    Memes options yt-dlp que _try_download. Renvoie True si succes.
+    """
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ytdlp_path, url,
+        "-x",
+        "--audio-format", fmt,
+        "--audio-quality", "0",
+        "--embed-metadata",
+        "--no-playlist",
+        "--no-overwrites",
+        "--download-archive", str(outdir / ".yt-dlp-archive.txt"),
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "-o", str(outdir / "%(uploader)s - %(title)s.%(ext)s"),
+    ]
+    if fmt in ("mp3", "m4a", "aiff", "flac"):
+        cmd.insert(-2, "--embed-thumbnail")
+
+    for attempt in range(1, max_retries + 1):
+        res = subprocess.run(cmd, capture_output=True, text=True,
+                             encoding="utf-8", errors="replace")
+        if res.returncode == 0:
+            return True
+        err = (res.stderr or "").strip().splitlines()
+        log(f"    SoundCloud tentative {attempt}/{max_retries} echouee : "
+            f"{err[-1] if err else 'erreur inconnue'}")
+        if attempt < max_retries:
+            time.sleep(retry_delay * attempt)
+    return False
+
+
 # ------------------------------- main ---------------------------------------
 
-def process_playlist(name, cfg, state, args):
-    tracks = get_playlist_tracks(name)
-    if tracks is None:
+def process_playlist(entry, cfg, state, args, explicit=False):
+    """
+    entry : nom de playlist de l'app Musique, URL ou fichier .csv (cle de state.json).
+    explicit : entree passee en argument -> au 1er passage on telecharge tout
+               (au lieu d'enregistrer une baseline).
+    """
+    fetched = fetch_tracks(entry, cfg.get("ytdlp_path", "yt-dlp"))
+    if fetched is None:
         return 0, 0, 0
+    name, tracks = fetched
     if not tracks:
         log(f'"{name}" : 0 morceau.')
         return 0, 0, 0
 
-    current_keys = [track_key(a, t) for a, t in tracks]
-    seen = set(state.get(name, {}).get("seen", []))
-    first_time = name not in state
+    current_keys = [track_key(t.artist, t.title) for t in tracks]
+    seen = set(state.get(entry, {}).get("seen", []))
+    first_time = entry not in state
 
     # Determine quoi telecharger
-    if args.download_all:
+    if args.download_all or (first_time and explicit):
         to_get = list(zip(current_keys, tracks))
     elif first_time:
         # baseline : on memorise sans rien telecharger
-        state[name] = {"seen": current_keys, "updated": datetime.now().isoformat()}
+        state[entry] = {"seen": current_keys, "updated": datetime.now().isoformat()}
         log(f'"{name}" : baseline enregistree ({len(tracks)} morceaux), aucun telechargement '
             f'(utilise --download-all pour tout recuperer).')
         return 0, 0, 0
@@ -279,15 +263,15 @@ def process_playlist(name, cfg, state, args):
     if not to_get:
         log(f'"{name}" : aucune nouveaute.')
         # rien a faire mais on rafraichit l'etat au cas ou
-        state[name] = {"seen": sorted(seen | set(current_keys)),
-                       "updated": datetime.now().isoformat()}
+        state[entry] = {"seen": sorted(seen | set(current_keys)),
+                        "updated": datetime.now().isoformat()}
         return 0, 0, 0
 
     log(f'"{name}" : {len(to_get)} nouveau(x) morceau(x).')
 
     if args.dry_run:
-        for key, (artist, title) in to_get:
-            log(f'  -> (dry-run) {f"{artist} {title}".strip()}')
+        for key, t in to_get:
+            log(f'  -> (dry-run) {t.url or t.query}')
         return 0, 0, len(to_get)
 
     if cfg["subfolder_per_playlist"]:
@@ -298,14 +282,19 @@ def process_playlist(name, cfg, state, args):
 
     ok = fail = 0
     succeeded = set()
-    for key, (artist, title) in to_get:
-        query = f"{artist} {title}".strip()
+    for key, t in to_get:
+        query = t.query
         log(f'  -> {query}')
-        if download(query, outdir, cfg["audio_format"], cfg["search_results"],
-                    cfg["max_retries"], cfg["retry_delay_sec"],
-                    ytdlp_path=cfg.get("ytdlp_path", "yt-dlp"),
-                    youtube_player_clients=cfg.get("youtube_player_clients", "ios,web,mweb"),
-                    youtube_cookies_browser=cfg.get("youtube_cookies_browser", "")):
+        if t.url:
+            done = download_direct(t.url, outdir, cfg["audio_format"], cfg["max_retries"],
+                                   cfg["retry_delay_sec"], ytdlp_path=cfg.get("ytdlp_path", "yt-dlp"))
+        else:
+            done = download(query, outdir, cfg["audio_format"], cfg["search_results"],
+                            cfg["max_retries"], cfg["retry_delay_sec"],
+                            ytdlp_path=cfg.get("ytdlp_path", "yt-dlp"),
+                            youtube_player_clients=cfg.get("youtube_player_clients", "ios,web,mweb"),
+                            youtube_cookies_browser=cfg.get("youtube_cookies_browser", ""))
+        if done:
             ok += 1
             succeeded.add(key)
             log(f'     OK')
@@ -316,8 +305,8 @@ def process_playlist(name, cfg, state, args):
     # "seen" = ce qui etait deja vu + les morceaux reussis aujourd'hui.
     # Les echecs ne sont PAS marques -> ils seront retentes au prochain passage.
     new_seen = seen | succeeded
-    state[name] = {"seen": sorted(new_seen),
-                   "updated": datetime.now().isoformat()}
+    state[entry] = {"seen": sorted(new_seen),
+                    "updated": datetime.now().isoformat()}
     return ok, fail, len(to_get)
 
 
@@ -330,7 +319,15 @@ def get_ytdlp_version(ytdlp_path):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Apple Music -> SoundCloud (yt-dlp), verification quotidienne")
+    p = argparse.ArgumentParser(
+        description="Playlists (Apple Music, Spotify, Deezer, SoundCloud, CSV) -> SoundCloud (yt-dlp)")
+    p.add_argument("sources", nargs="*", metavar="SOURCE",
+                   help="URL de playlist/album/titre, fichier .csv ou nom de playlist de l'app "
+                        "Musique (macOS). 1er passage : tout est telecharge, ensuite les "
+                        "nouveautes. Sans SOURCE : lit playlists.txt")
+    p.add_argument("-o", "--output", help="Dossier de sortie (remplace output_dir de config.json)")
+    p.add_argument("--format", help="Format audio : wav, aiff, flac, mp3... "
+                                    "(remplace audio_format de config.json)")
     p.add_argument("--dry-run", action="store_true",
                    help="Liste les nouveautes sans rien telecharger")
     p.add_argument("--download-all", action="store_true",
@@ -339,15 +336,26 @@ def main():
     args = p.parse_args()
 
     cfg = load_config()
+    if args.output:
+        cfg["output_dir"] = args.output
+    if args.format:
+        cfg["audio_format"] = args.format.lower().lstrip(".")
     ytdlp_path = cfg.get("ytdlp_path", "yt-dlp")
 
     if not (Path(ytdlp_path).is_file() or shutil.which(ytdlp_path)):
         sys.exit(f"yt-dlp introuvable : {ytdlp_path}. Installe-le : brew install yt-dlp ffmpeg")
 
-    playlists = [args.playlist] if args.playlist else load_playlists()
+    # (entree, explicite) : les SOURCE en argument telechargent tout au 1er passage
+    if args.sources or args.playlist:
+        playlists = [(s, True) for s in args.sources]
+        if args.playlist:
+            playlists.append((args.playlist, False))
+    else:
+        playlists = [(s, False) for s in load_playlists()]
 
     if not playlists:
-        sys.exit(f"Aucune playlist. Ajoute des noms dans : {PLAYLISTS_FILE}")
+        sys.exit(f"Aucune playlist. Ajoute des URL ou des noms dans : {PLAYLISTS_FILE}\n"
+                 f"ou passe une URL : python mixdownload.py <url>")
 
     state = load_json(STATE_FILE, {})
 
@@ -360,8 +368,8 @@ def main():
         + (" | DOWNLOAD-ALL" if args.download_all else ""))
 
     total_ok = total_fail = total_new = 0
-    for name in playlists:
-        ok, fail, new = process_playlist(name, cfg, state, args)
+    for entry, explicit in playlists:
+        ok, fail, new = process_playlist(entry, cfg, state, args, explicit)
         total_ok += ok
         total_fail += fail
         total_new += new
