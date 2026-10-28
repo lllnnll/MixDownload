@@ -1,0 +1,11 @@
+# Une playlist Apple Music par ligne (nom EXACT tel qu'affiche dans l'app Musique).
+# Les lignes vides et celles commencant par # sont ignorees.
+#
+# Exemple :
+# Mes sons a mixer
+# Diggin 2026
+#
+# >>> Ajoute tes playlists ci-dessous <<<
+Drum & Bass
+Dubstep
+Neurofunk

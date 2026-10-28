@@ -1,0 +1,11 @@
+{
+  "output_dir": "/Users/nikita/Claude/Projects/MixDownload/downloads",
+  "audio_format": "wav",
+  "subfolder_per_playlist": true,
+  "max_retries": 4,
+  "retry_delay_sec": 5,
+  "search_results": 3,
+  "ytdlp_path": "yt-dlp",
+  "youtube_player_clients": "ios,web,mweb",
+  "youtube_cookies_browser": "chrome"
+}

@@ -1,0 +1,8 @@
+# Morceaux telecharges (volumineux)
+downloads/
+# Logs et etat genere automatiquement
+*.log
+state.json
+__pycache__/
+.DS_Store
+.claude/settings.local.json
