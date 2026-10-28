@@ -28,3 +28,8 @@ spotify_token.json
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+
+# Reglages personnels (generes au 1er lancement / propres a chaque machine)
+config.json
+playlists.txt
+com.nikita.mixdownload.plist
